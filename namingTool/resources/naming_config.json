@@ -1,0 +1,84 @@
+{
+    "convention_name": "VFX Modeling Naming Convention",
+    "version": "1.0.0",
+
+    "separator": "_",
+    "case": "camelCase",
+    "padding": 2,
+
+    "sides": {
+        "left": "L",
+        "right": "R",
+        "center": "C",
+        "front": "F",
+        "back": "B",
+        "top": "T",
+        "bottom": "Bt"
+    },
+    "side_position": "prefix",
+    "side_from_bbox": {"positive_x": "L", "negative_x": "R"},
+
+    "suffixes": {
+        "geometry": "GEO",
+        "group": "GRP",
+        "locator": "LOC",
+        "nurbsCurve": "CRV",
+        "nurbsSurface": "NRB",
+        "poly": "PLY",
+        "camera": "CAM",
+        "light": "LGT",
+        "joint": "JNT",
+        "controller": "CTL",
+        "material": "MAT",
+        "shadingGroup": "SG",
+        "texture": "TEX",
+        "deformer": "DEF",
+        "constraint": "CNS",
+        "proxy": "PXY"
+    },
+
+    "node_type_suffix": {
+        "mesh": "GEO",
+        "nurbsSurface": "NRB",
+        "subdiv": "GEO",
+        "nurbsCurve": "CRV",
+        "bezierCurve": "CRV",
+        "locator": "LOC",
+        "camera": "CAM",
+        "joint": "JNT",
+        "pointLight": "LGT",
+        "spotLight": "LGT",
+        "directionalLight": "LGT",
+        "areaLight": "LGT",
+        "aiAreaLight": "LGT",
+        "aiSkyDomeLight": "LGT",
+        "group": "GRP"
+    },
+
+    "root_pattern": "{asset}_GRP",
+    "required_groups": ["geo_GRP"],
+    "optional_groups": ["proxy_GRP", "guide_GRP"],
+    "group_purpose": {
+        "geo_GRP": "render",
+        "proxy_GRP": "proxy",
+        "guide_GRP": "guide"
+    },
+
+    "lod_token": {"enabled": false, "pattern": "lod{n}"},
+
+    "forbidden_words": ["final", "new", "test", "temp", "copy", "pasted", "ok"],
+
+    "protected_nodes": [
+        "persp", "top", "front", "side",
+        "initialShadingGroup", "initialParticleSE",
+        "lambert1", "standardSurface1", "particleCloud1"
+    ],
+
+    "default_name_patterns": [
+        "pCube", "pSphere", "pCylinder", "pPlane", "pTorus", "pCone",
+        "pPipe", "pPrism", "pPyramid", "pSolid", "pHelix", "pDisc",
+        "pPlatonic", "polySurface", "transform", "group", "null",
+        "locator", "nurbsCircle", "nurbsSphere", "curve", "joint",
+        "camera", "ikHandle", "cluster"
+    ]
+}

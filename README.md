@@ -1,172 +1,119 @@
-# CG Asset Renamer — Maya 2025.3
+# Naming Tool — Maya 2025.3 (Pipeline VFX / Modeling)
 
-Outil de **renommage** et de **vérification** des noms d'assets pour le
-département modeling / surfacing. Le modeler sélectionne un ou plusieurs
-objets, ouvre l'outil, remplit une petite fenêtre de paramètres, et l'objet
-est renommé selon une **convention de nommage centralisée et réutilisable**.
-L'outil permet aussi de **checker** si les noms existants sont conformes.
+Outil Python pour **Autodesk Maya 2025.3** qui aide les modeleurs à **nommer**,
+**valider** et **corriger** le naming de leurs assets selon une convention de
+type studio VFX. Objectif : rendre le *bon* nommage plus rapide que le mauvais,
+et bloquer en amont les problèmes qui cassent le pipeline (`pCube1`,
+duplicate names, exports Alembic/USD, `final_final`).
 
-> Compatible **Maya 2025.3** (Python 3.11, PySide6 / Qt6).
-
----
-
-## 1. Aperçu
-
-La fenêtre propose :
-
-| Paramètre            | Exemple            | Requis |
-|----------------------|--------------------|:------:|
-| Name of the object   | `hand`             |  oui   |
-| Place / Position     | `Top / Bot / L / R…` | non  |
-| Surface type         | `metal / plastic / glass…` | oui |
-| Color                | `grey / black / red…` | non  |
-| Type                 | `GEO / PT / FX…`   |  oui   |
-
-Un **aperçu en temps réel** montre le nom final avant de l'appliquer, par ex. :
-
-```
-hand_L_metal_grey_GEO
-```
-
-En sélection multiple, un index numérique est ajouté automatiquement pour
-garantir l'unicité :
-
-```
-screw_metal_01_GEO
-screw_metal_02_GEO
-screw_metal_03_GEO
-```
+- **Python 3.11 / PySide6 (Qt6)** — fenêtre dockable parentée à Maya.
+- **Convention 100% pilotée par un fichier de config** — changez le JSON, tout
+  se reconfigure (regex, presets UI, checks) sans toucher au code.
+- **API headless** pour intégration dans un script de publish.
 
 ---
 
-## 2. La convention de nommage
-
-Format général (les éléments optionnels vides sont simplement omis) :
+## 1. La convention
 
 ```
-<name>_<place>_<surface>_<color>_[index]_<TYPE>
-   │       │        │        │       │       └── suffixe identifiant (toujours en dernier)
-   │       │        │        │       └────────── index numérique automatique (batch)
-   │       │        │        └────────────────── couleur dominante (optionnel)
-   │       │        └─────────────────────────── matériau / surface (requis)
-   │       └──────────────────────────────────── position (optionnel)
-   └──────────────────────────────────────────── nom descriptif, un seul mot camelCase (requis)
+[side]_[descriptor][increment]_[SUFFIX]
 ```
 
-Règles appliquées (validité Maya) :
+| Token | Requis | Description | Exemples |
+|-------|:------:|-------------|----------|
+| `side` | optionnel | latéralité | `L`, `R`, `C`, `F`/`B`, `T`/`Bt` |
+| `descriptor` | **oui** | description **camelCase**, du général au spécifique | `doorHandle`, `wheelFront` |
+| `increment` | optionnel | numéro à padding fixe, commence à `01` | `chairLeg01` |
+| `SUFFIX` | **oui** | type de nœud, MAJUSCULES | `GEO`, `GRP`, `LOC`… |
 
-- caractères autorisés : lettres, chiffres, `_` uniquement ;
-- ne peut pas commencer par un chiffre ;
-- pas d'espaces ni de caractères spéciaux (nettoyés automatiquement) ;
-- `name` est un mot unique (`engine block` → `engineblock`) ;
-- pas de noms réservés Maya (`persp`, `top`, `front`, `side`…).
+**Valides :** `L_doorHandle_GEO`, `wheelFront01_GEO`, `C_body_GEO`, `chassis_GRP`
+**Invalides :** `pCube1`, `Door Handle_geo`, `1stFloor_GEO`, `handle_GEO1`
 
-### Pourquoi ce format ?
-
-- Le **type en suffixe** (`GEO`, `PT`, `FX`…) permet de filtrer/trier vite,
-  et de reconnaître la nature d'un node d'un coup d'œil.
-- Chaque valeur de liste (`metal`, `grey`, `L`…) provient d'un **vocabulaire
-  contrôlé et disjoint** : le checker identifie donc chaque slot par sa valeur,
-  ce qui rend les champs optionnels sûrs à omettre sans ambiguïté.
+Suffixes par défaut : `GEO GRP LOC CRV NRB PLY CAM LGT JNT CTL MAT SG TEX DEF CNS PXY`.
+Compat USD/Alembic par construction (identifiants `[A-Za-z0-9_]`, pas de chiffre
+initial, pas de namespaces) ; groupes `geo_/proxy_/guide_GRP` → purposes USD
+`render/proxy/guide`.
 
 ---
 
-## 3. La convention est un fichier — réutilisable et modifiable
+## 2. Installation
 
-Toute la convention vit dans **`config/naming_convention.json`**. Pas besoin de
-toucher au code pour :
+**Glisser-déposer :** faites glisser `install_drag_drop.py` dans le viewport de
+Maya → un bouton shelf **NamingTool** est créé et l'outil s'ouvre.
 
-- ajouter une surface (`carbon`, `chrome`…) ou une couleur ;
-- ajouter/retirer un token, changer l'ordre, le séparateur ;
-- rendre un champ requis ou optionnel.
-
-La fenêtre se régénère automatiquement à partir de ce fichier. Vous pouvez
-distribuer un JSON commun à toute l'équipe (voir la variable d'environnement
-`CG_RENAMER_CONFIG` ci-dessous) pour garantir la **même convention partout**.
-
----
-
-## 4. Installation
-
-### Méthode simple (glisser-déposer)
-
-1. Récupérez le dossier de l'outil sur votre machine.
-2. Faites glisser **`install.py`** dans le viewport de Maya.
-3. Un bouton **`CGRenamer`** est ajouté à la shelf courante, et l'outil s'ouvre.
-
-L'installeur ajoute aussi le chemin à votre `userSetup.py`, donc l'import
-fonctionne après redémarrage.
-
-### Méthode manuelle
-
-Dans le Script Editor (onglet Python) :
-
+**Manuel :**
 ```python
-import sys
-sys.path.append(r"CHEMIN/VERS/CG_tool/src")
-import cg_renamer.launch as launch
-launch.main()
+import sys; sys.path.append(r"CHEMIN/VERS/CG_tool")
+import namingTool; namingTool.show()
 ```
 
-### Convention partagée par l'équipe (optionnel)
+**Config partagée équipe :** variable d'environnement
+`NAMINGTOOL_CONFIG=//serveur/pipeline/naming_config.json` (deep-merge sur les
+valeurs par défaut).
 
-Pointez tout le monde vers le même JSON via une variable d'environnement
-(dans `Maya.env` ou l'environnement système) :
+---
 
-```
-CG_RENAMER_CONFIG=//serveur/pipeline/naming/naming_convention.json
+## 3. Fonctionnalités
+
+### Onglet Renamer
+- **Rename & Number** : `base01_GEO`, `base02_GEO`… dans l'ordre de sélection.
+- **Prefix / Suffix rapides** : boutons presets (sides + suffixes) anti-doublon.
+- **Search & Replace** : sélection / hiérarchie / scène, wildcards, casse.
+- **Auto Suffix** *(fonction phare)* : inspecte le type réel de chaque nœud
+  (mesh→`GEO`, group→`GRP`, curve→`CRV`, locator→`LOC`…) et applique/corrige le
+  bon suffixe.
+- **Side by BBox** : préfixe `L_`/`R_` selon le centre X du bounding box.
+- **Cleanup** : caractères illégaux, `-`/espace → camelCase, `pasted__`,
+  namespaces, shapes désynchronisées.
+- Tout est **undoable en un seul Ctrl+Z**.
+
+### Onglet Validator (sanity check)
+Portée **Selection / Hierarchy / Scene**. Chaque check : ✅/⚠️/❌ + liste
+**cliquable** des nœuds fautifs (clic = select) + **Fix** quand automatisable.
+
+1. Noms par défaut Maya (`pCube*`, `polySurface*`, `group*`…)
+2. Duplicate short names
+3. Suffixe manquant / invalide
+4. Suffixe incohérent avec le type réel
+5. Caractères illégaux / casse / `__` / `_` final
+6. Shapes désynchronisées (`ball_GEO` ↔ `pCubeShape3`)
+7. Namespaces présents
+8. Hiérarchie (géo orpheline au monde, groupes vides)
+9. Numérotation incohérente (padding mixte)
+10. *(bonus)* transforms GEO non freezés
+
+Boutons **Run All**, **Select Errors**, **Export Report** (`.json` / `.txt`).
+
+### Mode headless (publish)
+```python
+from namingTool.core import checks
+report = checks.run_all(scope="scene")   # {check: {"status","nodes","message","fixable"}}
+if any(r["status"] == "error" for r in report.values()):
+    raise RuntimeError("Naming errors — publish bloqué.")
 ```
 
 ---
 
-## 5. Utilisation
-
-**Renommer**
-1. Sélectionnez le(s) objet(s) dans Maya.
-2. Ouvrez l'outil, remplissez les champs (aperçu en direct).
-3. Cliquez **RENAME selection**.
-
-**Vérifier (check)**
-- **Check selection** : contrôle les objets sélectionnés.
-- **Check scene** : contrôle tous les transforms de la scène.
-- Le tableau liste chaque nom, `OK` / `INVALID`, et le détail des erreurs.
-- Double-cliquez une ligne pour **sélectionner l'objet** correspondant dans Maya.
-- **Auto-fix selection** : renomme automatiquement les objets non conformes
-  vers le nom valide le plus proche (garde les tokens reconnus, complète les
-  champs requis manquants avec leurs valeurs par défaut, nettoie les caractères
-  interdits et les chiffres en tête).
-- **Export CSV** : exporte le dernier rapport de vérification pour la revue de scène.
-
-**Auto-detect Type**
-- La case *Auto-detect Type* déduit le champ `Type` de la forme de chaque objet
-  (mesh → `GEO`, nurbsCurve → `CRV`, joint → `JNT`, locator → `LOC`,
-  camera → `CAM`, light → `LGT`, particules/fluids → `FX`, transform sans shape
-  → `GRP`). Pratique pour renommer une sélection hétérogène en une passe.
-
-> Renommage & auto-fix sont encapsulés dans un **seul undo** (Ctrl+Z annule tout le batch).
-
----
-
-## 6. Structure du projet
+## 4. Architecture
 
 ```
-CG_tool/
-├── config/
-│   └── naming_convention.json     # LA convention (éditable, réutilisable)
-├── src/cg_renamer/
-│   ├── naming_convention.py       # cœur logique (build / parse / validate) — sans Maya
-│   ├── maya_utils.py              # wrappers maya.cmds
-│   ├── renamer.py                 # opérations rename / check
-│   ├── renamer_ui.py              # fenêtre PySide6 (générée depuis le JSON)
-│   └── launch.py                  # point d'entrée
-├── tests/
-│   └── test_naming_convention.py  # tests unitaires (hors Maya)
-├── install.py                     # installeur glisser-déposer + bouton shelf
-└── README.md
+namingTool/
+├── __init__.py            # namingTool.show()
+├── launch.py              # workspaceControl dockable
+├── core/
+│   ├── config.py          # load/save/merge JSON (defaults embarqués)
+│   ├── naming.py          # regex centrale, parse/build/validate — SANS Maya
+│   ├── maya_utils.py      # helpers maya.cmds partagés (undo, introspection)
+│   ├── renamer.py         # opérations de rename (undo chunks)
+│   └── checks.py          # 10 checks + fixes + API headless
+├── ui/                    # PySide6 : main_window, renamer_tab, validator_tab
+└── resources/naming_config.json
+install_drag_drop.py
+tests/test_naming.py       # 17 tests (hors Maya)
 ```
 
-Le cœur logique est **indépendant de Maya** : les tests tournent avec un simple
-`python -m unittest`, sans session Maya.
+Une **regex unique** dérivée de la config est partagée par le renamer et le
+validator (aucune duplication de logique). Le cœur est testable sans Maya :
 
 ```bash
 python -m unittest discover tests -v
@@ -174,22 +121,29 @@ python -m unittest discover tests -v
 
 ---
 
-## 7. Pistes d'évolution (recherche / idées)
+## 5. Configuration (`naming_config.json`)
 
-Déjà livré : renommage, check (sélection / scène), **auto-fix**, **détection
-auto du Type**, **undo groupé**, **export CSV**.
+Extrait :
+```json
+{
+  "separator": "_", "case": "camelCase", "padding": 2,
+  "sides": {"left": "L", "right": "R", "center": "C"},
+  "suffixes": {"geometry": "GEO", "group": "GRP", "locator": "LOC", "...": "..."},
+  "node_type_suffix": {"mesh": "GEO", "nurbsCurve": "CRV", "joint": "JNT"},
+  "lod_token": {"enabled": false, "pattern": "lod{n}"},
+  "forbidden_words": ["final", "new", "test", "temp", "copy", "pasted"],
+  "protected_nodes": ["persp", "top", "front", "side"]
+}
+```
+Changer `"geometry": "GEO"` → `"MSH"` reconfigure regex, presets et checks.
 
-Suite possible, classée par valeur :
+---
 
-1. **Détection de doublons** dans la scène + surlignage.
-2. **Presets par département** (Modeling, Surfacing, Layout…) : plusieurs JSON
-   sélectionnables dans un menu déroulant.
-3. **Renommage de la hiérarchie / des shapes** en même temps que le transform
-   (garder `objShape` cohérent).
-4. **Intégration pipeline** : validation à la publication (hook avant export
-   Alembic / USD) pour bloquer les noms non conformes.
-5. **Support namespaces / références** et gestion des collisions inter-assets.
-6. **Règles de casse strictes** (camelCase forcé sur `name`, UPPER sur `type`)
-   avec normalisation automatique.
+## 6. Nommage des fichiers (rappel, hors périmètre de l'outil)
 
-Dis-moi lesquelles t'intéressent et je les ajoute.
+```
+<SHOW>_<assetType>_<assetName>_<step>_<variant>_<lod>_<version>.<ext>
+ex : TOTRS_prop_chair_model_main_lod0_v003.ma
+```
+WIP : `<asset>_<step>_<descriptor>_v###_<initiales>.ma`. Versions en `v###`,
+jamais `final` / `new` / `ok2`.
