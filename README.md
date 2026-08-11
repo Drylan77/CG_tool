@@ -131,6 +131,19 @@ CG_RENAMER_CONFIG=//serveur/pipeline/naming/naming_convention.json
 - **Check scene** : contrôle tous les transforms de la scène.
 - Le tableau liste chaque nom, `OK` / `INVALID`, et le détail des erreurs.
 - Double-cliquez une ligne pour **sélectionner l'objet** correspondant dans Maya.
+- **Auto-fix selection** : renomme automatiquement les objets non conformes
+  vers le nom valide le plus proche (garde les tokens reconnus, complète les
+  champs requis manquants avec leurs valeurs par défaut, nettoie les caractères
+  interdits et les chiffres en tête).
+- **Export CSV** : exporte le dernier rapport de vérification pour la revue de scène.
+
+**Auto-detect Type**
+- La case *Auto-detect Type* déduit le champ `Type` de la forme de chaque objet
+  (mesh → `GEO`, nurbsCurve → `CRV`, joint → `JNT`, locator → `LOC`,
+  camera → `CAM`, light → `LGT`, particules/fluids → `FX`, transform sans shape
+  → `GRP`). Pratique pour renommer une sélection hétérogène en une passe.
+
+> Renommage & auto-fix sont encapsulés dans un **seul undo** (Ctrl+Z annule tout le batch).
 
 ---
 
@@ -163,24 +176,20 @@ python -m unittest discover tests -v
 
 ## 7. Pistes d'évolution (recherche / idées)
 
-Cette V1 se concentre sur *renommer + checker*, comme demandé. Idées pour la
-suite, classées par valeur :
+Déjà livré : renommage, check (sélection / scène), **auto-fix**, **détection
+auto du Type**, **undo groupé**, **export CSV**.
 
-1. **Auto-fix / batch-fix** — bouton « corriger » qui propose et applique le
-   nom conforme le plus proche pour chaque objet `INVALID`.
-2. **Détection du type automatique** — pré-remplir le champ `Type` en
-   inspectant le node (mesh → `GEO`, nurbsCurve → `CRV`, joint → `JNT`…).
-3. **Détection de doublons** dans la scène + surlignage.
-4. **Presets par département** (Modeling, Surfacing, Layout…) : plusieurs JSON
+Suite possible, classée par valeur :
+
+1. **Détection de doublons** dans la scène + surlignage.
+2. **Presets par département** (Modeling, Surfacing, Layout…) : plusieurs JSON
    sélectionnables dans un menu déroulant.
-5. **Renommage de la hiérarchie / des shapes** en même temps que le transform
+3. **Renommage de la hiérarchie / des shapes** en même temps que le transform
    (garder `objShape` cohérent).
-6. **Export d'un rapport** de conformité (CSV / JSON) pour la revue de scène.
-7. **Intégration pipeline** : validation à la publication (hook avant export
+4. **Intégration pipeline** : validation à la publication (hook avant export
    Alembic / USD) pour bloquer les noms non conformes.
-8. **Support namespaces / références** et gestion des collisions inter-assets.
-9. **Undo groupé** : encapsuler un batch de renommage dans un seul `undoChunk`.
-10. **Règles de casse strictes** (camelCase forcé sur `name`, UPPER sur `type`)
-    avec normalisation automatique.
+5. **Support namespaces / références** et gestion des collisions inter-assets.
+6. **Règles de casse strictes** (camelCase forcé sur `name`, UPPER sur `type`)
+   avec normalisation automatique.
 
 Dis-moi lesquelles t'intéressent et je les ajoute.

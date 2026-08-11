@@ -78,6 +78,7 @@ class RenamerWindow(QtWidgets.QDialog):
         self.convention = NamingConvention.from_file(config_path)
         self.renamer = Renamer(self.convention)
         self.fields: Dict[str, TokenField] = {}
+        self._last_entries: List[CheckEntry] = []
 
         self.setObjectName(WINDOW_OBJECT_NAME)
         self.setWindowTitle(f"CG Asset Renamer  -  {self.convention.name} v{self.convention.version}")
@@ -125,6 +126,14 @@ class RenamerWindow(QtWidgets.QDialog):
         prev_layout.addWidget(self.selection_info)
         root.addWidget(prev_box)
 
+        # -- options ---------------------------------------------------- #
+        self.auto_type_cb = QtWidgets.QCheckBox("Auto-detect Type depuis le node (mesh->GEO, curve->CRV...)")
+        self.auto_type_cb.setToolTip(
+            "Ignore le champ Type et le deduit de la forme de chaque objet."
+        )
+        self.auto_type_cb.stateChanged.connect(self._on_auto_type_toggled)
+        root.addWidget(self.auto_type_cb)
+
         # -- rename buttons --------------------------------------------- #
         btn_row = QtWidgets.QHBoxLayout()
         self.refresh_btn = QtWidgets.QPushButton("Refresh selection")
@@ -144,8 +153,18 @@ class RenamerWindow(QtWidgets.QDialog):
         self.check_sel_btn.clicked.connect(lambda: self._on_check(scope="selection"))
         self.check_scene_btn = QtWidgets.QPushButton("Check scene")
         self.check_scene_btn.clicked.connect(lambda: self._on_check(scope="scene"))
+        self.autofix_btn = QtWidgets.QPushButton("Auto-fix selection")
+        self.autofix_btn.setToolTip(
+            "Renomme les objets selectionnes non conformes vers le nom valide le plus proche."
+        )
+        self.autofix_btn.clicked.connect(self._on_autofix)
+        self.export_btn = QtWidgets.QPushButton("Export CSV")
+        self.export_btn.setToolTip("Exporte le dernier rapport de verification en CSV.")
+        self.export_btn.clicked.connect(self._on_export)
         check_btn_row.addWidget(self.check_sel_btn)
         check_btn_row.addWidget(self.check_scene_btn)
+        check_btn_row.addWidget(self.autofix_btn)
+        check_btn_row.addWidget(self.export_btn)
         check_layout.addLayout(check_btn_row)
 
         self.result_tree = QtWidgets.QTreeWidget()
@@ -175,6 +194,14 @@ class RenamerWindow(QtWidgets.QDialog):
         except Exception:  # noqa: BLE001
             return 0
 
+    def _on_auto_type_toggled(self) -> None:
+        """Grey out the Type field when auto-detection is enabled."""
+        auto = self.auto_type_cb.isChecked()
+        type_field = self.fields.get("type")
+        if type_field:
+            type_field.setEnabled(not auto)
+        self._refresh_preview()
+
     def _refresh_preview(self) -> None:
         values = self._current_values()
         count = max(1, self._selection_count())
@@ -189,27 +216,56 @@ class RenamerWindow(QtWidgets.QDialog):
             self.preview_label.setText(f"[incomplet] {exc}")
 
         sel = self._selection_count()
+        notes = []
+        if sel > 1:
+            notes.append("index numerique ajoute automatiquement")
+        if self.auto_type_cb.isChecked():
+            notes.append("Type auto-detecte par objet (l'apercu montre le champ Type courant)")
         self.selection_info.setText(
-            f"{sel} objet(s) selectionne(s)"
-            + ("  -  index numerique ajoute automatiquement" if sel > 1 else "")
+            f"{sel} objet(s) selectionne(s)" + ("  -  " + " ; ".join(notes) if notes else "")
         )
 
     def _on_rename(self) -> None:
         try:
-            results = self.renamer.rename_selection(self._current_values())
+            results = self.renamer.rename_selection(
+                self._current_values(),
+                auto_detect_type=self.auto_type_cb.isChecked(),
+            )
         except (RuntimeError, ValueError) as exc:
             QtWidgets.QMessageBox.warning(self, "Renaming", str(exc))
             return
+        self._report_rename(results, title="Renaming")
+        self._refresh_preview()
 
+    def _on_autofix(self) -> None:
+        try:
+            results = self.renamer.autofix_selection(
+                auto_detect_type=self.auto_type_cb.isChecked()
+            )
+        except RuntimeError as exc:
+            QtWidgets.QMessageBox.warning(self, "Auto-fix", str(exc))
+            return
+        self._report_rename(results, title="Auto-fix")
+        # refresh the check table on the (now renamed) selection
+        try:
+            self._populate_results(self.renamer.check_selection())
+        except RuntimeError:
+            pass
+
+    def _report_rename(self, results, title: str) -> None:
         ok = [r for r in results if r.status == "ok"]
         err = [r for r in results if r.status == "error"]
+        skipped = [r for r in results if r.status == "skipped"]
         msg = f"{len(ok)} objet(s) renomme(s)."
+        if skipped:
+            msg += f"  {len(skipped)} deja conforme(s)."
         if err:
-            msg += f"\n{len(err)} erreur(s):\n" + "\n".join(f"- {e.old_name}: {e.message}" for e in err)
-            QtWidgets.QMessageBox.warning(self, "Renaming", msg)
+            msg += f"\n{len(err)} erreur(s):\n" + "\n".join(
+                f"- {e.old_name}: {e.message}" for e in err
+            )
+            QtWidgets.QMessageBox.warning(self, title, msg)
         else:
-            QtWidgets.QMessageBox.information(self, "Renaming", msg)
-        self._refresh_preview()
+            QtWidgets.QMessageBox.information(self, title, msg)
 
     def _on_check(self, scope: str) -> None:
         try:
@@ -223,7 +279,22 @@ class RenamerWindow(QtWidgets.QDialog):
 
         self._populate_results(entries)
 
+    def _on_export(self) -> None:
+        if not self._last_entries:
+            QtWidgets.QMessageBox.information(
+                self, "Export", "Lance d'abord un Check pour generer un rapport."
+            )
+            return
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self, "Exporter le rapport", "naming_report.csv", "CSV (*.csv)"
+        )
+        if not path:
+            return
+        self.renamer.export_report(self._last_entries, path)
+        QtWidgets.QMessageBox.information(self, "Export", f"Rapport ecrit:\n{path}")
+
     def _populate_results(self, entries: List[CheckEntry]) -> None:
+        self._last_entries = entries
         self.result_tree.clear()
         ok_count = 0
         for entry in entries:

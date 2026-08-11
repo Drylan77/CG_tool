@@ -5,6 +5,7 @@ Ties the :class:`NamingConvention` to Maya through :mod:`maya_utils`.
 
 from __future__ import annotations
 
+import csv
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 
@@ -50,11 +51,15 @@ class Renamer:
         self,
         values: Dict[str, str],
         ensure_unique: bool = True,
+        auto_detect_type: bool = False,
     ) -> List[RenameEntry]:
         """Rename the current Maya selection using ``values``.
 
         When several objects are selected a numeric index is added
         automatically (if enabled in the convention) to keep names unique.
+        When ``auto_detect_type`` is set, the ``type`` token is inferred from
+        each node's shape, overriding the value from the form.
+        The whole batch is wrapped in a single undo step.
         """
         selection = maya_utils.get_selection(long_names=True)
         if not selection:
@@ -62,18 +67,57 @@ class Renamer:
 
         results: List[RenameEntry] = []
         count = len(selection)
-        names = self.build_preview(values, count=count)
 
-        # Rename from the leaf up is safer with long names; iterate as-is,
-        # resolving each node freshly since paths change as we rename.
-        for node, desired in zip(selection, names):
-            old = maya_utils.short_name(node)
-            try:
-                target = maya_utils.make_unique(desired) if ensure_unique else desired
-                new = maya_utils.rename_node(node, target)
-                results.append(RenameEntry(old, maya_utils.short_name(new), "ok"))
-            except Exception as exc:  # noqa: BLE001 - report per-node failures
-                results.append(RenameEntry(old, desired, "error", str(exc)))
+        with maya_utils.undo_chunk("cgRenamer_rename"):
+            for i, node in enumerate(selection):
+                old = maya_utils.short_name(node)
+                node_values = dict(values)
+                if auto_detect_type:
+                    detected = maya_utils.detect_type(node)
+                    if detected:
+                        node_values["type"] = detected
+                idx = self._index_for(count, i)
+                try:
+                    desired = self.convention.build_name(node_values, index=idx)
+                    target = maya_utils.make_unique(desired) if ensure_unique else desired
+                    new = maya_utils.rename_node(node, target)
+                    results.append(RenameEntry(old, maya_utils.short_name(new), "ok"))
+                except Exception as exc:  # noqa: BLE001 - report per-node failures
+                    results.append(RenameEntry(old, old, "error", str(exc)))
+        return results
+
+    def _index_for(self, count: int, i: int):
+        """Return the batch index for position ``i`` (or None for a single obj)."""
+        idx_opt = self.convention.options.get("add_index", {})
+        if count > 1 and idx_opt.get("enabled"):
+            return int(idx_opt.get("start", 1)) + i
+        return None
+
+    def autofix_selection(self, auto_detect_type: bool = True) -> List[RenameEntry]:
+        """Rename every non-compliant selected node to its closest valid name."""
+        selection = maya_utils.get_selection(long_names=True)
+        if not selection:
+            raise RuntimeError("Aucun objet selectionne.")
+
+        results: List[RenameEntry] = []
+        with maya_utils.undo_chunk("cgRenamer_autofix"):
+            for node in selection:
+                old = maya_utils.short_name(node)
+                if self.convention.validate_name(old).is_valid:
+                    results.append(RenameEntry(old, old, "skipped", "deja conforme"))
+                    continue
+                overrides = {}
+                if auto_detect_type:
+                    detected = maya_utils.detect_type(node)
+                    if detected:
+                        overrides["type"] = detected
+                try:
+                    desired = self.convention.suggest_fix(old, overrides=overrides)
+                    target = maya_utils.make_unique(desired)
+                    new = maya_utils.rename_node(node, target)
+                    results.append(RenameEntry(old, maya_utils.short_name(new), "ok"))
+                except Exception as exc:  # noqa: BLE001
+                    results.append(RenameEntry(old, old, "error", str(exc)))
         return results
 
     # ------------------------------------------------------------------ #
@@ -101,3 +145,21 @@ class Renamer:
         reserved = set(self.convention.rules.get("reserved_maya_names", []))
         nodes = [n for n in nodes if maya_utils.short_name(n) not in reserved]
         return self.check_names(nodes)
+
+    # ------------------------------------------------------------------ #
+    # Reporting
+    # ------------------------------------------------------------------ #
+    @staticmethod
+    def export_report(entries: List[CheckEntry], path: str) -> str:
+        """Write a conformity report as CSV. Returns the written path."""
+        with open(path, "w", newline="", encoding="utf-8") as fh:
+            writer = csv.writer(fh)
+            writer.writerow(["name", "status", "errors", "node"])
+            for e in entries:
+                writer.writerow([
+                    e.name,
+                    "OK" if e.valid else "INVALID",
+                    " | ".join(e.errors),
+                    e.node,
+                ])
+        return path

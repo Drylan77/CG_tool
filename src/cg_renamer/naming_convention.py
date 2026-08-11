@@ -206,6 +206,71 @@ class NamingConvention:
         parsed, _ = self._analyze(name)
         return parsed
 
+    # -- auto-fix ------------------------------------------------------------ #
+    def suggest_fix(self, name: str, overrides: Optional[Dict[str, str]] = None) -> str:
+        """Return the closest compliant name for a (possibly invalid) name.
+
+        Recognised tokens are kept, unrecognised leading parts are folded back
+        into ``name``, missing required tokens fall back to their default, and
+        everything is sanitised. ``overrides`` (e.g. an auto-detected type)
+        takes precedence over the parsed values.
+        """
+        parsed, unrecognized = self._analyze(name)
+        values = dict(parsed)
+
+        # Any choice value that is not in its vocabulary is not a real token
+        # value: reclaim it (e.g. a missing type suffix pushes the color into
+        # the type slot).
+        reclaimed: List[str] = list(unrecognized)
+        for tok in self.tokens:
+            if tok.type == "choice":
+                val = values.get(tok.key, "")
+                if val and not tok.is_valid_value(val):
+                    reclaimed.append(val)
+                    values[tok.key] = ""
+
+        # A reclaimed value that matches an empty choice token's vocabulary is
+        # re-homed there rather than dumped into the name.
+        leftover: List[str] = []
+        for val in reclaimed:
+            for tok in self.tokens:
+                if (
+                    tok.type == "choice"
+                    and not values.get(tok.key)
+                    and val
+                    and val in tok.allowed_values
+                ):
+                    values[tok.key] = val
+                    break
+            else:
+                leftover.append(val)
+        reclaimed = leftover
+
+        # Rebuild a clean name token from the parsed name + reclaimed bits.
+        text_key = next((t.key for t in self.tokens if t.type != "choice"), None)
+        if text_key is not None:
+            chunks = [values[text_key]] if values.get(text_key) else []
+            chunks.extend(reclaimed)
+            merged = sanitize_part("".join(c.capitalize() if i else c
+                                            for i, c in enumerate(chunks)))
+            merged = merged.lstrip("0123456789")  # cannot start with a digit
+            values[text_key] = merged
+
+        if overrides:
+            values.update({k: v for k, v in overrides.items() if v})
+
+        # Fill any still-missing required token with its default.
+        for tok in self.tokens:
+            if tok.required and not values.get(tok.key):
+                values[tok.key] = tok.default
+
+        # A required text token with no material to work from gets a safe stub.
+        for tok in self.tokens:
+            if tok.required and tok.type != "choice" and not values.get(tok.key):
+                values[tok.key] = "asset"
+
+        return self.build_name(values)
+
     # -- validate ------------------------------------------------------------ #
     def validate_name(self, name: str) -> ValidationResult:
         issues: List[ValidationIssue] = []

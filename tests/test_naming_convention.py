@@ -124,6 +124,43 @@ class TestParse(unittest.TestCase):
         self.assertTrue(res.is_valid, res.errors)
 
 
+class TestSuggestFix(unittest.TestCase):
+    def setUp(self):
+        self.conv = NamingConvention.from_file(CONFIG)
+
+    def _valid(self, name):
+        return self.conv.validate_name(name).is_valid
+
+    def test_fix_spaces_and_symbols(self):
+        fixed = self.conv.suggest_fix("hand metal!")
+        self.assertTrue(self._valid(fixed), fixed)
+
+    def test_fix_missing_required_uses_defaults(self):
+        fixed = self.conv.suggest_fix("hand")
+        self.assertTrue(self._valid(fixed), fixed)
+        # defaults: surface=metal, type=GEO
+        self.assertTrue(fixed.endswith("_GEO"))
+        self.assertIn("metal", fixed)
+
+    def test_fix_keeps_recognized_tokens(self):
+        fixed = self.conv.suggest_fix("hand_L_glass_red")  # missing type only
+        self.assertTrue(self._valid(fixed), fixed)
+        self.assertIn("glass", fixed)
+        self.assertIn("red", fixed)
+
+    def test_fix_leading_digit(self):
+        fixed = self.conv.suggest_fix("3hand_metal_GEO")
+        self.assertTrue(self._valid(fixed), fixed)
+
+    def test_fix_with_type_override(self):
+        fixed = self.conv.suggest_fix("hand_metal_GEO", overrides={"type": "CRV"})
+        self.assertTrue(fixed.endswith("_CRV"), fixed)
+
+    def test_already_valid_roundtrips(self):
+        fixed = self.conv.suggest_fix("hand_L_metal_grey_GEO")
+        self.assertEqual(fixed, "hand_L_metal_grey_GEO")
+
+
 class TestHelpers(unittest.TestCase):
     def test_sanitize(self):
         self.assertEqual(sanitize_part("  hello world! "), "helloworld")
